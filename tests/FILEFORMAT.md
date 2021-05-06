@@ -123,6 +123,7 @@ Available substitute variables include:
 - `%HTTP6PORT` - IPv6 port number of the HTTP server
 - `%HTTPPORT` - Port number of the HTTP server
 - `%HTTP2PORT` - Port number of the HTTP/2 server
+- `%HTTP2SPORT` - Port number of the HTTP/2 secure server
 - `%HTTPSPORT` - Port number of the HTTPS server
 - `%HTTPSPROXYPORT` - Port number of the HTTPS-proxy
 - `%HTTPTLS6PORT` - IPv6 port number of the HTTP TLS server
@@ -337,6 +338,7 @@ What server(s) this test case requires/uses. Available servers:
 - `http-proxy`
 - `http-unix`
 - `http/2`
+- `http/2-secure`
 - `http`
 - `https`
 - `httptls+srp-ipv6`

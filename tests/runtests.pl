@@ -157,6 +157,7 @@ my $HTTPTLSPORT=$noport; # HTTP TLS (non-stunnel) server port
 my $HTTPTLS6PORT=$noport; # HTTP TLS (non-stunnel) IPv6 server port
 my $HTTPPROXYPORT=$noport; # HTTP proxy port, when using CONNECT
 my $HTTP2PORT=$noport;   # HTTP/2 server port
+my $HTTP2SPORT=$noport;  # HTTP/2 secure server port
 my $DICTPORT=$noport;    # DICT server port
 my $SMBPORT=$noport;     # SMB server port
 my $SMBSPORT=$noport;    # SMBS server port
@@ -441,7 +442,7 @@ sub init_serverpidfile_hash {
     }
   }
   for my $proto (('tftp', 'sftp', 'socks', 'ssh', 'rtsp', 'httptls',
-                  'dict', 'smb', 'smbs', 'telnet', 'mqtt')) {
+                  'dict', 'smb', 'smbs', 'telnet', 'mqtt', 'http/2-secure')) {
     for my $ipvnum ((4, 6)) {
       for my $idnum ((1, 2)) {
         my $serv = servername_id($proto, $ipvnum, $idnum);
@@ -820,6 +821,7 @@ sub stopserver {
         # dynamic http port it too needs to get restarted when the http server
         # is killed
         push @killservers, "http/2";
+        push @killservers, "http/2-secure";
     }
     push @killservers, $server;
     #
@@ -1524,6 +1526,75 @@ sub runhttp2server {
     logmsg "RUN: failed to start the $srvrname server\n" if(!$http2pid);
 
     return ($http2pid, $pid2, $port);
+}
+
+#######################################################################
+# start the secure http2 server
+#
+sub runhttp2secureserver {
+    my ($verbose) = @_;
+    my $server;
+    my $srvrname;
+    my $pidfile;
+    my $logfile;
+    my $flags = "";
+    my $proto="http/2-secure";
+    my $ipvnum = 4;
+    my $idnum = 0;
+    my $exe = "$perl $srcdir/http2-secureserver.pl";
+    my $verbose_flag = "--verbose ";
+
+    $server = servername_id($proto, $ipvnum, $idnum);
+
+    $pidfile = $serverpidfile{$server};
+
+    # don't retry if the server doesn't work
+    if ($doesntrun{$pidfile}) {
+        return (0, 0, 0);
+    }
+
+    my $pid = processexists($pidfile);
+    if($pid > 0) {
+        stopserver($server, "$pid");
+    }
+    unlink($pidfile) if(-f $pidfile);
+
+    $srvrname = servername_str($proto, $ipvnum, $idnum);
+
+    $logfile = server_logfilename($LOGDIR, $proto, $ipvnum, $idnum);
+
+    $flags .= "--pidfile \"$pidfile\" --logfile \"$logfile\" ";
+    $flags .= "--connect $HOSTIP:$HTTPPORT ";
+    $flags .= "--srcdir \"$srcdir\" ";
+    $flags .= $verbose_flag if($debugprotocol);
+
+    my ($http2spid, $pid2);
+    my $port = 27013;
+    for(1 .. 10) {
+        $port += int(rand(900));
+        my $aflags = "--port $port $flags";
+
+        my $cmd = "$exe $aflags";
+        ($http2spid, $pid2) = startnew($cmd, $pidfile, 15, 0);
+
+        if($http2spid <= 0 || !pidexists($http2spid)) {
+            # it is NOT alive
+            stopserver($server, "$pid2");
+            $doesntrun{$pidfile} = 1;
+            $http2spid = $pid2 = 0;
+            next;
+        }
+        $doesntrun{$pidfile} = 0;
+
+        if($verbose) {
+            logmsg "RUN: $srvrname server PID $http2spid port $port\n";
+        }
+        last;
+    }
+
+    logmsg "RUN: failed to start the $srvrname server\n" if(!$http2spid);
+
+    return ($http2spid, $pid2, $port);
 }
 
 #######################################################################
@@ -3127,6 +3198,7 @@ sub checksystem {
                 $has_http2=1;
 
                 push @protocols, 'http/2';
+                push @protocols, 'http/2-secure';
             }
             if($feat =~ /HTTPS-proxy/) {
                 $has_httpsproxy=1;
@@ -3311,6 +3383,7 @@ sub subVariables {
     $$thing =~ s/${prefix}HTTPSPORT/$HTTPSPORT/g;
     $$thing =~ s/${prefix}HTTPSPROXYPORT/$HTTPSPROXYPORT/g;
     $$thing =~ s/${prefix}HTTP2PORT/$HTTP2PORT/g;
+    $$thing =~ s/${prefix}HTTP2SPORT/$HTTP2SPORT/g;
     $$thing =~ s/${prefix}HTTPPORT/$HTTPPORT/g;
     $$thing =~ s/${prefix}PROXYPORT/$HTTPPROXYPORT/g;
     $$thing =~ s/${prefix}MQTTPORT/$MQTTPORT/g;
@@ -4806,6 +4879,30 @@ sub startservers {
                 logmsg sprintf ("* pid http/2 => %d %d\n", $pid, $pid2)
                     if($verbose);
                 $run{'http/2'}="$pid $pid2";
+            }
+        }
+        elsif($what eq "http/2-secure") {
+            if($torture && $run{'http'} &&
+               !responsive_http_server("http", $verbose, 0, $HTTPPORT)) {
+                stopserver('http');
+            }
+            if(!$run{'http'}) {
+                ($pid, $pid2, $HTTPPORT) =
+                    runhttpserver("http", $verbose, 0);
+                if($pid <= 0) {
+                    return "failed starting HTTP server";
+                }
+                printf ("* pid http => %d %d\n", $pid, $pid2) if($verbose);
+                $run{'http'}="$pid $pid2";
+            }
+            if(!$run{'http/2-secure'}) {
+                ($pid, $pid2, $HTTP2SPORT) = runhttp2secureserver($verbose);
+                if($pid <= 0) {
+                    return "failed starting HTTP/2 secure server";
+                }
+                logmsg sprintf ("* pid http/2-secure => %d %d\n", $pid, $pid2)
+                    if($verbose);
+                $run{'http/2-secure'}="$pid $pid2";
             }
         }
         elsif($what eq "http") {

@@ -1,0 +1,65 @@
+<testcase>
+<info>
+<keywords>
+HTTP
+HTTP HEAD
+HTTP/2
+</keywords>
+</info>
+
+#
+# Server-side
+<reply>
+<data nocheck="yes">
+HTTP/1.1 200 OK
+Content-Length: 6
+Connection: close
+Content-Type: text/html
+Funny-head: yesyes
+
+</data>
+</reply>
+
+#
+# Client-side
+<client>
+<server>
+http/2-secure
+</server>
+<name>
+HTTP/2 over TLS
+</name>
+<command>
+--http2 --head --cacert %SRCDIR/certs/EdelCurlRoot-ca.crt https://localhost:%HTTP2SPORT/%TESTNUMBER
+</command>
+</client>
+
+#
+# Verify data after the test has been "shot"
+<verify>
+<strip>
+^Via:.*$
+</strip>
+<protocol>
+HEAD /%TESTNUMBER HTTP/1.1
+Host: localhost:%HTTP2SPORT
+User-Agent: curl/%VERSION
+Accept: */*
+X-Forwarded-Proto: https
+
+</protocol>
+<stdout>
+%if hyper
+HTTP/2 200 OK
+%else
+HTTP/2 200 
+%endif
+content-length: 6
+content-type: text/html
+funny-head: yesyes
+server: nghttpx
+via: 1.1 nghttpx
+
+</stdout>
+</verify>
+</testcase>
