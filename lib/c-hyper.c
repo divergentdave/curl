@@ -501,15 +501,71 @@ static CURLcode request_target(struct Curl_easy *data,
 {
   CURLcode result;
   struct dynbuf r;
+  const uint8_t *scheme;
+  size_t scheme_len;
+  struct dynbuf authority_dynbuf;
+  uint8_t *authority_ptr;
+  size_t authority_len;
+  struct dynbuf path_and_query_dynbuf;
+  uint8_t *path_and_query_ptr;
+  size_t path_and_query_len;
+  const char *path = data->state.up.path;
+  const char *query = data->state.up.query;
 
   Curl_dyn_init(&r, DYN_HTTP_REQUEST);
+  Curl_dyn_init(&path_and_query_dynbuf, DYN_HTTP_REQUEST);
+  Curl_dyn_init(&authority_dynbuf, DYN_HTTP_REQUEST);
 
   result = Curl_http_target(data, conn, &r);
   if(result)
     return result;
 
-  if(hyper_request_set_uri(req, (uint8_t *)Curl_dyn_uptr(&r),
-                           Curl_dyn_len(&r))) {
+  if(conn->handler->flags & PROTOPT_SSL) {
+    scheme = (uint8_t *)"https";
+    scheme_len = 5;
+  }
+  else {
+    scheme = (uint8_t *)"http";
+    scheme_len = 4;
+  }
+
+  if(conn->handler->defport == conn->remote_port) {
+    authority_ptr = (uint8_t *)conn->host.name;
+    authority_len = strlen(conn->host.name);
+  }
+  else {
+    result = Curl_dyn_addf(&authority_dynbuf, "%s:%d",
+                           conn->host.name, conn->remote_port);
+    if(result) {
+      Curl_dyn_free(&r);
+      return result;
+    }
+    authority_ptr = Curl_dyn_uptr(&authority_dynbuf);
+    authority_len = Curl_dyn_len(&authority_dynbuf);
+  }
+
+  if(query) {
+    result = Curl_dyn_addf(&path_and_query_dynbuf, "%s?%s", path, query);
+    if(result) {
+      Curl_dyn_free(&r);
+      Curl_dyn_free(&authority_dynbuf);
+      return result;
+    }
+    path_and_query_ptr = Curl_dyn_uptr(&path_and_query_dynbuf);
+    path_and_query_len = Curl_dyn_len(&path_and_query_dynbuf);
+  }
+  else {
+    path_and_query_ptr = (uint8_t *)path;
+    path_and_query_len = strlen(path);
+  }
+
+  if(hyper_request_set_uri_parts(req,
+                                 scheme,
+                                 scheme_len,
+                                 authority_ptr,
+                                 authority_len,
+                                 path_and_query_ptr,
+                                 path_and_query_len)) {
     failf(data, "error setting path");
     result = CURLE_OUT_OF_MEMORY;
   }
@@ -517,6 +573,8 @@ static CURLcode request_target(struct Curl_easy *data,
     result = debug_request(data, method, Curl_dyn_ptr(&r), h2);
 
   Curl_dyn_free(&r);
+  Curl_dyn_free(&authority_dynbuf);
+  Curl_dyn_free(&path_and_query_dynbuf);
 
   return result;
 }
